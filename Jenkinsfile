@@ -12,14 +12,9 @@ pipeline {
                     credentialsId: '8aa911b1-3f65-41ec-a401-880b729d3c56'
             }
         }
-        stage('Compile code') {
+        stage('Compile, test, package and install') {
             steps {
-                sh 'mvn compile'
-            }
-        }
-        stage('Test code') {
-            steps {
-                sh 'mvn test'
+                sh 'mvn clean install'
             }
             post {
                 always {
@@ -27,9 +22,11 @@ pipeline {
                 }
             }
         }
-        stage('Packages code') {
+        stage('SonarQube Analysis') {
             steps {
-                sh 'mvn package -DskipTests'
+                withSonarQubeEnv(installationName: 'MySonarQubeServer', credentialsId: 'sonarqubePWD') {
+                    sh 'mvn sonar:sonar -Dsonar.projectKey=country-service -Dsonar.projectName=country-service'
+                }
             }
         }
     }
