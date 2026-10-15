@@ -29,5 +29,27 @@ pipeline {
                 }
             }
         }
+        stage('Deploy jar to Nexus') {
+            steps {
+                sh 'mvn deploy -DskipTests'
+            }
+        }
+        stage('Upload reports to Nexus') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'nexusCred',
+                                 usernameVariable: 'NUSER', passwordVariable: 'NPASS')]) {
+                    sh '''
+                        cd target
+                        rm -f jacoco-report.zip surefire-reports.zip
+                        zip -r jacoco-report.zip site/jacoco
+                        zip -r surefire-reports.zip surefire-reports
+                        curl -f -u "$NUSER:$NPASS" --upload-file jacoco-report.zip \
+                          http://localhost:8081/repository/reports/country-service/build-$BUILD_NUMBER/jacoco-report.zip
+                        curl -f -u "$NUSER:$NPASS" --upload-file surefire-reports.zip \
+                          http://localhost:8081/repository/reports/country-service/build-$BUILD_NUMBER/surefire-reports.zip
+                    '''
+                }
+            }
+        }
     }
 }
