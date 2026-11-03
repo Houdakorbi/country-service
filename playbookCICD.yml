@@ -1,0 +1,81 @@
+---
+- name: Build and Deploy Docker Image to Kubernetes
+  hosts: localhost
+  connection: local
+  gather_facts: true
+
+  vars_files:
+    - vault.yml            # contient dockerhub_username et dockerhub_password (chiffre avec ansible-vault)
+
+  vars:
+    image_name: my-country-service
+    image_tag: v1          # remplace par Jenkins avec -e image_tag=$BUILD_NUMBER
+    dockerfile_path: './'
+    k8s_namespace: jenkins
+    kubeconfig_path: config   # remplace par Jenkins avec -e kubeconfig_path=...
+    image_repo: "{{ dockerhub_username }}/{{ image_name }}"
+
+  tasks:
+    - name: Log in to Docker Hub
+      community.docker.docker_login:
+        username: "{{ dockerhub_username }}"
+        password: "{{ dockerhub_password }}"
+        reauthorize: true
+      no_log: true
+
+    - name: Build Docker image
+      community.docker.docker_image:
+        build:
+          path: "{{ dockerfile_path }}"
+        name: "{{ image_repo }}"
+        tag: "{{ image_tag }}"
+        source: build
+        state: present
+        force_source: true
+
+    - name: Push the Docker image to Docker Hub
+      community.docker.docker_image:
+        name: "{{ image_repo }}"
+        tag: "{{ image_tag }}"
+        push: true
+        source: local
+      register: push_result
+      retries: 3
+      delay: 10
+      until: push_result is succeeded
+
+    - name: Pull Docker image (optional, for verification)
+      community.docker.docker_image:
+        name: "{{ image_repo }}"
+        tag: "{{ image_tag }}"
+        source: pull
+        force_source: true
+
+    - name: Apply Kubernetes Deployment
+      kubernetes.core.k8s:
+        state: present
+        namespace: "{{ k8s_namespace }}"
+        src: deployment.yaml
+        kubeconfig: "{{ kubeconfig_path }}"
+
+    - name: Use the image built by this run
+      kubernetes.core.k8s:
+        state: patched
+        kind: Deployment
+        name: my-country-service
+        namespace: "{{ k8s_namespace }}"
+        kubeconfig: "{{ kubeconfig_path }}"
+        definition:
+          spec:
+            template:
+              spec:
+                containers:
+                  - name: country-service-container
+                    image: "{{ image_repo }}:{{ image_tag }}"
+
+    - name: Apply Kubernetes Service
+      kubernetes.core.k8s:
+        state: present
+        namespace: "{{ k8s_namespace }}"
+        src: service.yaml
+        kubeconfig: "{{ kubeconfig_path }}"
